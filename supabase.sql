@@ -1,12 +1,5 @@
--- =====================================================================
---  MARIAGE ATICK — à coller dans Supabase > SQL Editor > Run
---  Mot de passe admin par défaut : mariage2026  (change-le dans Paramètres)
---  Script relançable sans risque (ne supprime rien)
--- =====================================================================
-
 create extension if not exists pgcrypto with schema extensions;
 
--- ---------- TABLES ----------
 create table if not exists public.mariage_settings (
   id            int primary key default 1 check (id = 1),
   groom         text not null default 'Atick Ali Aouad',
@@ -16,8 +9,8 @@ create table if not exists public.mariage_settings (
   women_time    text not null default '15h00',
   venue         text not null default '',
   maps_url      text not null default '',
-  card_bg       text,                         -- image de fond (data URL), optionnelle
-  qr_x          numeric not null default 35.0, -- positions en % de la carte
+  card_bg       text,
+  qr_x          numeric not null default 35.0,
   qr_y          numeric not null default 34.44,
   qr_size       numeric not null default 30.0,
   name_x        numeric not null default 52.06,
@@ -27,7 +20,6 @@ create table if not exists public.mariage_settings (
   admin_hash    text not null
 );
 
--- v2 : noms des mariés sur la carte + infos dans l'ovale
 alter table public.mariage_settings add column if not exists groom_y     numeric not null default 8.9;
 alter table public.mariage_settings add column if not exists bride_y     numeric not null default 26.2;
 alter table public.mariage_settings add column if not exists couple_w    numeric not null default 70;
@@ -52,11 +44,9 @@ create table if not exists public.mariage_guests (
   created_at     timestamptz not null default now()
 );
 
--- Accès direct interdit : tout passe par les fonctions ci-dessous
 alter table public.mariage_settings enable row level security;
 alter table public.mariage_guests   enable row level security;
 
--- ---------- AUTH ----------
 create or replace function public.mariage_check(p_pw text)
 returns void language plpgsql security definer set search_path = public, extensions as $$
 begin
@@ -79,7 +69,6 @@ begin
   update mariage_settings set admin_hash = crypt(p_new, gen_salt('bf')) where id = 1;
 end $$;
 
--- ---------- PARAMÈTRES ----------
 create or replace function public.mariage_get_settings(p_pw text)
 returns json language plpgsql security definer set search_path = public, extensions as $$
 begin
@@ -116,7 +105,6 @@ begin
   where id = 1;
 end $$;
 
--- ---------- INVITÉS ----------
 create or replace function public.mariage_list_guests(p_pw text)
 returns setof public.mariage_guests language plpgsql security definer set search_path = public, extensions as $$
 begin
@@ -169,7 +157,6 @@ begin
   update mariage_guests set checked_in_at = null where id = p_id;
 end $$;
 
--- ---------- SCANNER ----------
 create or replace function public.mariage_scan_lookup(p_pw text, p_token text)
 returns json language plpgsql security definer set search_path = public, extensions as $$
 begin
@@ -193,7 +180,6 @@ begin
   return json_build_object('status','ok','guest', row_to_json(r));
 end $$;
 
--- ---------- PAGE INVITÉ (publique) ----------
 create or replace function public.mariage_get_invitation(p_token text)
 returns json language plpgsql security definer set search_path = public, extensions as $$
 declare g mariage_guests;
@@ -207,7 +193,6 @@ begin
   );
 end $$;
 
--- Droits : seules les fonctions sont appelables
 revoke all on public.mariage_settings, public.mariage_guests from anon, authenticated;
 revoke execute on function public.mariage_check(text) from public, anon, authenticated;
 grant execute on function
