@@ -39,8 +39,6 @@ export default function Admin() {
     setBusy(true);
     setErr("");
     try {
-      if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
-        throw new Error("Variables Supabase absentes sur Vercel (NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY) — ajoute-les puis Redeploy.");
       const ok = await rpc("mariage_login", { p_pw: input.trim() });
       if (!ok) {
         setErr("Mot de passe incorrect");
