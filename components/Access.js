@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { rpc } from "@/lib/supabase";
 
 const ROLES = {
+  invite: { label: "Inviteur", desc: "Ajoute ses propres invités, dans la limite du quota" },
   scan: { label: "Scanner", desc: "Scanne les QR à l'entrée uniquement" },
   team: { label: "Équipe", desc: "Invités (ajout, envoi WhatsApp) + scanner" },
 };
@@ -10,6 +11,7 @@ const ERR = {
   PIN_INVALIDE: "Le PIN doit contenir 4 à 8 chiffres.",
   PIN_DEJA_UTILISE: "Ce PIN est déjà utilisé.",
   NOM_REQUIS: "Donne un nom à l'accès.",
+  QUOTA_ATTEINT: "Quota atteint.",
 };
 const genPin = () => String(Math.floor(100000 + Math.random() * 900000));
 const when = (iso) =>
@@ -17,7 +19,7 @@ const when = (iso) =>
 
 export default function Access({ pw }) {
   const [list, setList] = useState([]);
-  const [form, setForm] = useState({ name: "", pin: genPin(), role: "scan" });
+  const [form, setForm] = useState({ name: "", pin: genPin(), role: "invite", quota: 10 });
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState(null);
@@ -32,9 +34,9 @@ export default function Access({ pw }) {
     setBusy(true);
     setErr("");
     try {
-      await rpc("mariage_save_access", { p_pw: pw, p: form });
+      await rpc("mariage_save_access", { p_pw: pw, p: { ...form, quota: Number(form.quota) || 0 } });
       setCreated({ ...form });
-      setForm({ name: "", pin: genPin(), role: form.role });
+      setForm({ name: "", pin: genPin(), role: form.role, quota: form.quota });
       await load();
     } catch (e) { fail(e); }
     setBusy(false);
@@ -104,7 +106,15 @@ export default function Access({ pw }) {
             </button>
           ))}
         </div>
-        <button className="btn primary" style={{ marginTop: 14 }} disabled={busy || form.pin.length < 4 || !form.name.trim()}>
+        {form.role === "invite" && (
+          <div style={{ marginTop: 14, maxWidth: 220 }}>
+            <label className="f">Quota (nombre d'invités max)</label>
+            <input className="input" type="number" min="1" inputMode="numeric" value={form.quota}
+              onChange={(e) => setForm({ ...form, quota: e.target.value.replace(/\D/g, "") })}
+              style={{ fontSize: 18, fontWeight: 700 }} />
+          </div>
+        )}
+        <button className="btn primary" style={{ marginTop: 14 }} disabled={busy || form.pin.length < 4 || !form.name.trim() || (form.role === "invite" && !(Number(form.quota) > 0))}>
           + Créer l'accès
         </button>
         {err && <div className="err">{err}</div>}
@@ -115,6 +125,7 @@ export default function Access({ pw }) {
           <h3>✓ Accès prêt : {created.name}</h3>
           <p style={{ margin: "0 0 6px" }}>
             PIN : <b style={{ fontFamily: "monospace", fontSize: 22, letterSpacing: 3 }}>{created.pin}</b> · {ROLES[created.role].label}
+            {created.role === "invite" && created.quota ? ` · ${created.quota} invités max` : ""}
           </p>
           <p className="hint" style={{ margin: "0 0 10px" }}>Note-le maintenant : il ne sera plus affiché ensuite.</p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -122,7 +133,7 @@ export default function Access({ pw }) {
               className="btn wa"
               target="_blank"
               rel="noreferrer"
-              href={`https://wa.me/?text=${encodeURIComponent(`Accès mariage (${ROLES[created.role].label})\n${loginUrl}\nPIN : ${created.pin}`)}`}
+              href={`https://wa.me/?text=${encodeURIComponent(`Accès mariage (${ROLES[created.role].label}${created.role === "invite" && created.quota ? ` · ${created.quota} invités max` : ""})\n${loginUrl}\nPIN : ${created.pin}`)}`}
             >
               Partager par WhatsApp
             </a>
@@ -137,7 +148,12 @@ export default function Access({ pw }) {
           <div key={a.id} className="row" style={{ background: "var(--paper)", borderColor: "var(--line)", opacity: a.active ? 1 : 0.55 }}>
             <div className="who">
               <b>{a.name}</b>
-              <span className="pill" style={{ background: a.role === "team" ? "var(--olive)" : "var(--gold)", color: "#fff" }}>{ROLES[a.role]?.label}</span>
+              <span className="pill" style={{ background: a.role === "team" ? "var(--olive)" : a.role === "invite" ? "#8a6db3" : "var(--gold)", color: "#fff" }}>{ROLES[a.role]?.label}</span>
+              {a.role === "invite" && (
+                <span className="pill" style={{ background: a.used >= a.quota ? "var(--bad-bg)" : "#eef6e9", color: a.used >= a.quota ? "var(--bad)" : "var(--ok)" }}>
+                  {a.used} / {a.quota} invités
+                </span>
+              )}
               {!a.active && <span className="pill" style={{ background: "#eee", color: "#666" }}>Désactivé</span>}
               <div className="tel">Dernière connexion : {when(a.last_login)}</div>
             </div>
@@ -145,6 +161,14 @@ export default function Access({ pw }) {
               <select className="select" style={{ width: "auto", padding: "6px 8px" }} value={a.role} onChange={(e) => update(a, { role: e.target.value })}>
                 {Object.entries(ROLES).map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
               </select>
+              {a.role === "invite" && (
+                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13 }}>
+                  Quota
+                  <input className="input" type="number" min="0" defaultValue={a.quota} key={a.quota}
+                    style={{ width: 70, padding: "6px 8px" }}
+                    onBlur={(e) => { const q = Number(e.target.value); if (q !== a.quota) update(a, { quota: q }); }} />
+                </label>
+              )}
               <button className="btn sm" onClick={() => newPin(a)}>Nouveau PIN</button>
               <button className="btn sm" onClick={() => update(a, { active: !a.active })}>{a.active ? "Désactiver" : "Activer"}</button>
               <button className="btn sm danger" onClick={() => del(a)}>🗑</button>

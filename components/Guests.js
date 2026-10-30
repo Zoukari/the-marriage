@@ -7,7 +7,14 @@ import { whatsappLink } from "@/lib/message";
 
 const EMPTY = { first_name: "", last_name: "", phone_prefix: "+253", phone: "" };
 
-export default function Guests({ pw, settings }) {
+const ERRORS = {
+  QUOTA_ATTEINT: "Quota atteint : tu ne peux plus ajouter d'invités. Demande à l'admin d'augmenter ton quota.",
+  ACCES_REFUSE: "Action non autorisée.",
+  PRENOM_REQUIS: "Le prénom est obligatoire.",
+};
+
+export default function Guests({ pw, settings, me = { role: "admin" } }) {
+  const isInviter = me.role === "invite";
   const [guests, setGuests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("H");
@@ -49,7 +56,7 @@ export default function Guests({ pw, settings }) {
       setForm({ ...EMPTY, phone_prefix: form.phone_prefix });
       setEditId(null);
     } catch (e) {
-      setErr(e.message);
+      setErr(ERRORS[e.message] || e.message);
     }
     setSaving(false);
   }
@@ -95,12 +102,28 @@ export default function Guests({ pw, settings }) {
     setGuests((gs) => gs.map((x) => (x.id === g.id ? { ...x, checked_in_at: null } : x)));
   }
 
+  const quota = me.quota || 0;
+  const used = guests.length;
+  const full = isInviter && used >= quota;
   const sent = byTab.filter((g) => g.sent_at).length;
   const present = byTab.filter((g) => g.checked_in_at).length;
 
   return (
     <>
-      <h2>Liste des invités</h2>
+      <h2>{isInviter ? "Mes invités" : "Liste des invités"}</h2>
+
+      {isInviter && (
+        <div className="panel" style={{ background: full ? "var(--bad-bg)" : "var(--paper)", borderColor: full ? "var(--bad)" : "var(--line)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
+            <b style={{ fontSize: 16 }}>{full ? "Quota atteint" : "Invitations restantes"}</b>
+            <b style={{ fontSize: 26, color: full ? "var(--bad)" : "var(--olive)" }}>{Math.max(quota - used, 0)}</b>
+          </div>
+          <div style={{ height: 8, background: "var(--line)", borderRadius: 99, marginTop: 10, overflow: "hidden" }}>
+            <div style={{ width: `${quota ? Math.min((used / quota) * 100, 100) : 100}%`, height: "100%", background: full ? "var(--bad)" : "var(--olive)" }} />
+          </div>
+          <div className="hint">{used} / {quota} invités ajoutés</div>
+        </div>
+      )}
 
       <div className="tabs">
         <button className={`tab H ${tab === "H" ? "on" : ""}`} onClick={() => { setTab("H"); setEditId(null); setForm(EMPTY); }}>
@@ -139,7 +162,7 @@ export default function Guests({ pw, settings }) {
           <input className="input" inputMode="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="77 12 34 56" />
         </div>
         <div className="wide" style={{ display: "flex", gap: 6 }}>
-          <button className="btn primary" disabled={saving} style={{ flex: 1 }}>
+          <button className="btn primary" disabled={saving || (full && !editId)} style={{ flex: 1 }}>
             {editId ? "Enregistrer" : "+ Ajouter"}
           </button>
           {editId && (
@@ -164,6 +187,7 @@ export default function Guests({ pw, settings }) {
               <div className="who">
                 <b>{fullName(g)}</b>
                 {g.sent_at && <span className="pill sent">✓ Envoyé</span>}
+                {!isInviter && g.invited_by_name && <span className="pill" style={{ background: "#efe9f7", color: "#6b4f96" }}>par {g.invited_by_name}</span>}
                 {g.checked_in_at && <span className="pill in">Entré{g.gender === "F" ? "e" : ""} {new Date(g.checked_in_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}{g.checked_in_by ? ` · ${g.checked_in_by}` : ""}</span>}
                 <div className="tel">{g.phone ? `${g.phone_prefix} ${g.phone}` : "Pas de numéro"}</div>
               </div>
@@ -172,7 +196,7 @@ export default function Guests({ pw, settings }) {
                 <button className="btn sm" onClick={() => openCard(g)}>Carte</button>
                 <button className="btn sm" onClick={() => dlQR(g)}>⬇ QR</button>
                 <button className="btn sm" onClick={() => edit(g)}>✎</button>
-                {g.checked_in_at && <button className="btn sm" onClick={() => resetIn(g)} title="Annuler l'entrée">↺</button>}
+                {g.checked_in_at && !isInviter && <button className="btn sm" onClick={() => resetIn(g)} title="Annuler l'entrée">↺</button>}
                 <button className="btn sm danger" onClick={() => del(g)}>🗑</button>
               </div>
             </div>

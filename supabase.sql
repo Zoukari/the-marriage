@@ -56,6 +56,13 @@ create table if not exists public.mariage_access (
   created_at  timestamptz not null default now()
 );
 
+alter table public.mariage_access add column if not exists quota int not null default 0;
+alter table public.mariage_access drop constraint if exists mariage_access_role_check;
+alter table public.mariage_access add constraint mariage_access_role_check check (role in ('scan','team','invite'));
+
+alter table public.mariage_guests add column if not exists invited_by uuid references public.mariage_access(id) on delete set null;
+alter table public.mariage_guests add column if not exists invited_by_name text;
+
 alter table public.mariage_settings enable row level security;
 alter table public.mariage_access enable row level security;
 alter table public.mariage_guests   enable row level security;
@@ -78,7 +85,8 @@ begin
   end if;
   select * into a from mariage_access where active and pin_hash = crypt(p_pw, pin_hash) limit 1;
   if a.id is not null then
-    return json_build_object('role', a.role, 'name', a.name, 'id', a.id);
+    return json_build_object('role', a.role, 'name', a.name, 'id', a.id, 'quota', a.quota,
+      'used', (select count(*) from mariage_guests where invited_by = a.id));
   end if;
   return null;
 end $$;
@@ -90,7 +98,10 @@ begin
   me := mariage_auth(p_pw);
   if me is null then raise exception 'MOT_DE_PASSE_INVALIDE'; end if;
   r := me->>'role';
-  if r = 'admin' or (p_level = 'team' and r = 'team') or (p_level = 'scan' and r in ('team','scan')) then
+  if r = 'admin' or p_level = 'any'
+     or (p_level = 'team' and r = 'team')
+     or (p_level = 'guests' and r in ('team','invite'))
+     or (p_level = 'scan' and r in ('team','scan')) then
     return me;
   end if;
   raise exception 'ACCES_REFUSE';
@@ -112,8 +123,9 @@ create or replace function public.mariage_list_access(p_pw text)
 returns json language plpgsql security definer set search_path = public, extensions as $$
 begin
   perform mariage_check(p_pw);
-  return coalesce((select json_agg(json_build_object('id',id,'name',name,'role',role,'active',active,
-    'last_login',last_login,'created_at',created_at) order by created_at) from mariage_access), '[]'::json);
+  return coalesce((select json_agg(json_build_object('id',a.id,'name',a.name,'role',a.role,'active',a.active,
+    'quota',a.quota,'used',(select count(*) from mariage_guests g where g.invited_by = a.id),
+    'last_login',a.last_login,'created_at',a.created_at) order by a.created_at) from mariage_access a), '[]'::json);
 end $$;
 
 create or replace function public.mariage_save_access(p_pw text, p jsonb)
@@ -132,13 +144,15 @@ begin
   if p->>'id' is null then
     if pin is null then raise exception 'PIN_INVALIDE'; end if;
     if coalesce(trim(p->>'name'),'') = '' then raise exception 'NOM_REQUIS'; end if;
-    insert into mariage_access (name, pin_hash, role)
-    values (trim(p->>'name'), crypt(pin, gen_salt('bf')), coalesce(p->>'role','scan'));
+    insert into mariage_access (name, pin_hash, role, quota)
+    values (trim(p->>'name'), crypt(pin, gen_salt('bf')), coalesce(p->>'role','scan'),
+            greatest(coalesce((p->>'quota')::int, 0), 0));
   else
     update mariage_access set
       name     = coalesce(nullif(trim(p->>'name'),''), name),
       role     = coalesce(p->>'role', role),
       active   = coalesce((p->>'active')::boolean, active),
+      quota    = greatest(coalesce((p->>'quota')::int, quota), 0),
       pin_hash = case when pin is null then pin_hash else crypt(pin, gen_salt('bf')) end
     where id = (p->>'id')::uuid;
   end if;
@@ -168,7 +182,7 @@ end $$;
 create or replace function public.mariage_get_settings(p_pw text)
 returns json language plpgsql security definer set search_path = public, extensions as $$
 begin
-  perform mariage_need(p_pw, 'scan');
+  perform mariage_need(p_pw, 'any');
   return (select to_jsonb(s) - 'admin_hash' from mariage_settings s where id = 1);
 end $$;
 
@@ -203,21 +217,35 @@ end $$;
 
 create or replace function public.mariage_list_guests(p_pw text)
 returns setof public.mariage_guests language plpgsql security definer set search_path = public, extensions as $$
+declare me json;
 begin
-  perform mariage_need(p_pw, 'scan');
-  return query select * from mariage_guests order by created_at desc;
+  me := mariage_need(p_pw, 'any');
+  if me->>'role' = 'invite' then
+    return query select * from mariage_guests where invited_by = (me->>'id')::uuid order by created_at desc;
+  else
+    return query select * from mariage_guests order by created_at desc;
+  end if;
 end $$;
 
 create or replace function public.mariage_upsert_guest(p_pw text, p jsonb)
 returns public.mariage_guests language plpgsql security definer set search_path = public, extensions as $$
-declare r mariage_guests;
+declare r mariage_guests; me json; inv boolean; mid uuid;
 begin
-  perform mariage_need(p_pw, 'team');
+  me := mariage_need(p_pw, 'guests');
+  inv := me->>'role' = 'invite';
+  mid := (me->>'id')::uuid;
   if coalesce(trim(p->>'first_name'),'') = '' then raise exception 'PRENOM_REQUIS'; end if;
   if p->>'id' is null then
-    insert into mariage_guests (first_name, last_name, phone_prefix, phone, gender)
+    if inv then
+      perform 1 from mariage_access where id = mid for update;
+      if (select count(*) from mariage_guests where invited_by = mid) >= (select quota from mariage_access where id = mid) then
+        raise exception 'QUOTA_ATTEINT';
+      end if;
+    end if;
+    insert into mariage_guests (first_name, last_name, phone_prefix, phone, gender, invited_by, invited_by_name)
     values (trim(p->>'first_name'), trim(coalesce(p->>'last_name','')),
-            coalesce(p->>'phone_prefix','+253'), coalesce(p->>'phone',''), p->>'gender')
+            coalesce(p->>'phone_prefix','+253'), coalesce(p->>'phone',''), p->>'gender',
+            mid, case when me->>'role' = 'admin' then null else me->>'name' end)
     returning * into r;
   else
     update mariage_guests set
@@ -226,24 +254,29 @@ begin
       phone_prefix = coalesce(p->>'phone_prefix', phone_prefix),
       phone        = coalesce(p->>'phone', phone),
       gender       = coalesce(p->>'gender', gender)
-    where id = (p->>'id')::uuid
+    where id = (p->>'id')::uuid and (not inv or invited_by = mid)
     returning * into r;
+    if r.id is null then raise exception 'ACCES_REFUSE'; end if;
   end if;
   return r;
 end $$;
 
 create or replace function public.mariage_delete_guest(p_pw text, p_id uuid)
 returns void language plpgsql security definer set search_path = public, extensions as $$
+declare me json;
 begin
-  perform mariage_need(p_pw, 'team');
-  delete from mariage_guests where id = p_id;
+  me := mariage_need(p_pw, 'guests');
+  delete from mariage_guests where id = p_id
+    and (me->>'role' <> 'invite' or invited_by = (me->>'id')::uuid);
 end $$;
 
 create or replace function public.mariage_mark_sent(p_pw text, p_id uuid)
 returns void language plpgsql security definer set search_path = public, extensions as $$
+declare me json;
 begin
-  perform mariage_need(p_pw, 'team');
-  update mariage_guests set sent_at = now() where id = p_id;
+  me := mariage_need(p_pw, 'guests');
+  update mariage_guests set sent_at = now() where id = p_id
+    and (me->>'role' <> 'invite' or invited_by = (me->>'id')::uuid);
 end $$;
 
 create or replace function public.mariage_reset_checkin(p_pw text, p_id uuid)

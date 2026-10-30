@@ -8,12 +8,12 @@ import Access from "@/components/Access";
 
 const KEY = "mariage_admin_pw";
 const NAV = [
-  { id: "guests", label: "Invités", ic: "👥", roles: ["admin", "team"] },
+  { id: "guests", label: "Invités", ic: "👥", roles: ["admin", "team", "invite"] },
   { id: "scan", label: "Scanner QR", ic: "📷", roles: ["admin", "team", "scan"] },
   { id: "access", label: "Accès PIN", ic: "🔑", roles: ["admin"] },
   { id: "settings", label: "Paramètres", ic: "⚙️", roles: ["admin"] },
 ];
-const ROLE_LABEL = { admin: "Admin", team: "Équipe", scan: "Scanner" };
+const ROLE_LABEL = { admin: "Admin", team: "Équipe", scan: "Scanner", invite: "Inviteur" };
 
 export default function Admin() {
   const [pw, setPw] = useState(null);
@@ -122,7 +122,7 @@ export default function Admin() {
         <button className="nav" onClick={logout}>↩ Déconnexion</button>
       </aside>
       <main className="main">
-        {view === "guests" && me.role !== "scan" && <Guests pw={pw} settings={settings} />}
+        {view === "guests" && me.role !== "scan" && <Guests pw={pw} settings={settings} me={me} />}
         {view === "scan" && <Scanner pw={pw} />}
         {view === "access" && me.role === "admin" && <Access pw={pw} />}
         {view === "settings" && me.role === "admin" && <Settings pw={pw} settings={settings} onSaved={setSettings} onLogout={logout} />}
