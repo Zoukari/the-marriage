@@ -39,12 +39,24 @@ export default function Admin() {
     setBusy(true);
     setErr("");
     try {
-      const ok = await rpc("mariage_login", { p_pw: input });
-      if (!ok) throw new Error();
-      try { localStorage.setItem(KEY, input); } catch {}
-      setPw(input);
-    } catch {
-      setErr("Mot de passe incorrect");
+      if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+        throw new Error("Variables Supabase absentes sur Vercel (NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY) — ajoute-les puis Redeploy.");
+      const ok = await rpc("mariage_login", { p_pw: input.trim() });
+      if (!ok) {
+        setErr("Mot de passe incorrect");
+      } else {
+        try { localStorage.setItem(KEY, input.trim()); } catch {}
+        setPw(input.trim());
+      }
+    } catch (e) {
+      const m = String(e.message || e);
+      setErr(
+        /mariage_login|schema cache|does not exist|Could not find/i.test(m)
+          ? "Le SQL n'est pas installé dans ce projet Supabase (celui des variables Vercel). Lance supabase.sql dedans."
+          : /Invalid API key|JWT|apikey/i.test(m)
+          ? "Clé Supabase invalide : vérifie NEXT_PUBLIC_SUPABASE_ANON_KEY sur Vercel puis Redeploy."
+          : `Erreur : ${m}`
+      );
     }
     setBusy(false);
   }
