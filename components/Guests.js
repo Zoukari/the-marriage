@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { rpc } from "@/lib/supabase";
 import { PREFIXES } from "@/lib/prefixes";
-import { renderCard, qrDataUrl, downloadDataUrl, fullName, slug } from "@/lib/card";
+import { renderFullPage, qrDataUrl, downloadDataUrl, fullName, slug } from "@/lib/card";
 import { whatsappLink } from "@/lib/message";
 
 const EMPTY = { first_name: "", last_name: "", phone_prefix: "+253", phone: "" };
@@ -81,7 +81,7 @@ export default function Guests({ pw, settings }) {
 
   async function openCard(g) {
     setPreview({ guest: g, url: null });
-    const c = await renderCard(settings, g);
+    const c = await renderFullPage(settings, g);
     setPreview({ guest: g, url: c.toDataURL("image/png") });
   }
 
@@ -186,7 +186,7 @@ export default function Guests({ pw, settings }) {
             {preview.url ? <img src={preview.url} alt="Carte" /> : <div className="empty">Génération…</div>}
             <div className="btns">
               <button className="btn primary" disabled={!preview.url} onClick={() => downloadDataUrl(preview.url, `invitation-${slug(fullName(preview.guest))}.png`)}>
-                ⬇ Télécharger la carte
+                ⬇ Télécharger (image)
               </button>
               <button className="btn" onClick={() => dlQR(preview.guest)}>⬇ QR seul</button>
               <button className="btn" onClick={() => setPreview(null)}>Fermer</button>
