@@ -164,7 +164,7 @@ export default function Guests({ pw, settings }) {
               <div className="who">
                 <b>{fullName(g)}</b>
                 {g.sent_at && <span className="pill sent">✓ Envoyé</span>}
-                {g.checked_in_at && <span className="pill in">Entré{g.gender === "F" ? "e" : ""} {new Date(g.checked_in_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span>}
+                {g.checked_in_at && <span className="pill in">Entré{g.gender === "F" ? "e" : ""} {new Date(g.checked_in_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}{g.checked_in_by ? ` · ${g.checked_in_by}` : ""}</span>}
                 <div className="tel">{g.phone ? `${g.phone_prefix} ${g.phone}` : "Pas de numéro"}</div>
               </div>
               <div className="actions">

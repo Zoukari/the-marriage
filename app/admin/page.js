@@ -4,13 +4,16 @@ import { rpc } from "@/lib/supabase";
 import Guests from "@/components/Guests";
 import Scanner from "@/components/Scanner";
 import Settings from "@/components/Settings";
+import Access from "@/components/Access";
 
 const KEY = "mariage_admin_pw";
 const NAV = [
-  { id: "guests", label: "Invités", ic: "👥" },
-  { id: "scan", label: "Scanner QR", ic: "📷" },
-  { id: "settings", label: "Paramètres", ic: "⚙️" },
+  { id: "guests", label: "Invités", ic: "👥", roles: ["admin", "team"] },
+  { id: "scan", label: "Scanner QR", ic: "📷", roles: ["admin", "team", "scan"] },
+  { id: "access", label: "Accès PIN", ic: "🔑", roles: ["admin"] },
+  { id: "settings", label: "Paramètres", ic: "⚙️", roles: ["admin"] },
 ];
+const ROLE_LABEL = { admin: "Admin", team: "Équipe", scan: "Scanner" };
 
 export default function Admin() {
   const [pw, setPw] = useState(null);
@@ -19,6 +22,7 @@ export default function Admin() {
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState("guests");
   const [settings, setSettings] = useState(null);
+  const [me, setMe] = useState(null);
 
   useEffect(() => {
     try {
@@ -29,9 +33,17 @@ export default function Admin() {
 
   useEffect(() => {
     if (!pw) return;
-    rpc("mariage_get_settings", { p_pw: pw })
-      .then(setSettings)
-      .catch(() => logout());
+    (async () => {
+      try {
+        const who = await rpc("mariage_whoami", { p_pw: pw });
+        if (!who) return logout();
+        setMe(who);
+        setView(who.role === "scan" ? "scan" : "guests");
+        setSettings(await rpc("mariage_get_settings", { p_pw: pw }));
+      } catch {
+        logout();
+      }
+    })();
   }, [pw]);
 
   async function login(e) {
@@ -39,9 +51,9 @@ export default function Admin() {
     setBusy(true);
     setErr("");
     try {
-      const ok = await rpc("mariage_login", { p_pw: input.trim() });
+      const ok = await rpc("mariage_whoami", { p_pw: input.trim() });
       if (!ok) {
-        setErr("Mot de passe incorrect");
+        setErr("Mot de passe ou PIN incorrect");
       } else {
         try { localStorage.setItem(KEY, input.trim()); } catch {}
         setPw(input.trim());
@@ -49,8 +61,8 @@ export default function Admin() {
     } catch (e) {
       const m = String(e.message || e);
       setErr(
-        /mariage_login|schema cache|does not exist|Could not find/i.test(m)
-          ? "Le SQL n'est pas installé dans ce projet Supabase (celui des variables Vercel). Lance supabase.sql dedans."
+        /mariage_whoami|schema cache|does not exist|Could not find/i.test(m)
+          ? "La base n'est pas à jour : relance supabase.sql dans Supabase (SQL Editor)."
           : /Invalid API key|JWT|apikey/i.test(m)
           ? "Clé Supabase invalide : vérifie NEXT_PUBLIC_SUPABASE_ANON_KEY sur Vercel puis Redeploy."
           : `Erreur : ${m}`
@@ -63,6 +75,7 @@ export default function Admin() {
     try { localStorage.removeItem(KEY); } catch {}
     setPw(null);
     setSettings(null);
+    setMe(null);
   }
 
   if (!pw) {
@@ -74,7 +87,7 @@ export default function Admin() {
           <input
             className="input"
             type="password"
-            placeholder="Mot de passe"
+            placeholder="Mot de passe ou PIN"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             autoFocus
@@ -88,9 +101,9 @@ export default function Admin() {
     );
   }
 
-  if (!settings) return <div className="loading">Chargement…</div>;
+  if (!settings || !me) return <div className="loading">Chargement…</div>;
 
-  const navBtns = NAV.map((n) => (
+  const navBtns = NAV.filter((n) => n.roles.includes(me.role)).map((n) => (
     <button key={n.id} className={`nav ${view === n.id ? "on" : ""}`} onClick={() => setView(n.id)}>
       <span className="ic">{n.ic}</span> {n.label}
     </button>
@@ -102,18 +115,22 @@ export default function Admin() {
         <div className="brand">
           {settings.groom}
           {settings.bride ? ` & ${settings.bride}` : ""}
-          <small>Admin mariage</small>
+          <small>{me.role === "admin" ? "Admin" : `${me.name} · ${ROLE_LABEL[me.role]}`}</small>
         </div>
         {navBtns}
         <div className="spacer" />
         <button className="nav" onClick={logout}>↩ Déconnexion</button>
       </aside>
       <main className="main">
-        {view === "guests" && <Guests pw={pw} settings={settings} />}
+        {view === "guests" && me.role !== "scan" && <Guests pw={pw} settings={settings} />}
         {view === "scan" && <Scanner pw={pw} />}
-        {view === "settings" && <Settings pw={pw} settings={settings} onSaved={setSettings} onLogout={logout} />}
+        {view === "access" && me.role === "admin" && <Access pw={pw} />}
+        {view === "settings" && me.role === "admin" && <Settings pw={pw} settings={settings} onSaved={setSettings} onLogout={logout} />}
       </main>
-      <nav className="mobilebar">{navBtns}</nav>
+      <nav className="mobilebar">
+        {navBtns}
+        <button className="nav" onClick={logout}><span className="ic">↩</span> Sortir</button>
+      </nav>
     </div>
   );
 }

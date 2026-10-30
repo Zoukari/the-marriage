@@ -44,7 +44,20 @@ create table if not exists public.mariage_guests (
   created_at     timestamptz not null default now()
 );
 
+alter table public.mariage_guests add column if not exists checked_in_by text;
+
+create table if not exists public.mariage_access (
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null,
+  pin_hash    text not null,
+  role        text not null default 'scan' check (role in ('scan','team')),
+  active      boolean not null default true,
+  last_login  timestamptz,
+  created_at  timestamptz not null default now()
+);
+
 alter table public.mariage_settings enable row level security;
+alter table public.mariage_access enable row level security;
 alter table public.mariage_guests   enable row level security;
 
 create or replace function public.mariage_check(p_pw text)
@@ -53,6 +66,89 @@ begin
   if not exists (select 1 from mariage_settings where id = 1 and admin_hash = crypt(p_pw, admin_hash)) then
     raise exception 'MOT_DE_PASSE_INVALIDE';
   end if;
+end $$;
+
+create or replace function public.mariage_auth(p_pw text)
+returns json language plpgsql security definer set search_path = public, extensions as $$
+declare a mariage_access;
+begin
+  if p_pw is null or p_pw = '' then return null; end if;
+  if exists (select 1 from mariage_settings where id = 1 and admin_hash = crypt(p_pw, admin_hash)) then
+    return json_build_object('role','admin','name','Admin');
+  end if;
+  select * into a from mariage_access where active and pin_hash = crypt(p_pw, pin_hash) limit 1;
+  if a.id is not null then
+    return json_build_object('role', a.role, 'name', a.name, 'id', a.id);
+  end if;
+  return null;
+end $$;
+
+create or replace function public.mariage_need(p_pw text, p_level text)
+returns json language plpgsql security definer set search_path = public, extensions as $$
+declare me json; r text;
+begin
+  me := mariage_auth(p_pw);
+  if me is null then raise exception 'MOT_DE_PASSE_INVALIDE'; end if;
+  r := me->>'role';
+  if r = 'admin' or (p_level = 'team' and r = 'team') or (p_level = 'scan' and r in ('team','scan')) then
+    return me;
+  end if;
+  raise exception 'ACCES_REFUSE';
+end $$;
+
+create or replace function public.mariage_whoami(p_pw text)
+returns json language plpgsql security definer set search_path = public, extensions as $$
+declare me json;
+begin
+  me := mariage_auth(p_pw);
+  if me is null then perform pg_sleep(0.8); return null; end if;
+  if me->>'id' is not null then
+    update mariage_access set last_login = now() where id = (me->>'id')::uuid;
+  end if;
+  return me;
+end $$;
+
+create or replace function public.mariage_list_access(p_pw text)
+returns json language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform mariage_check(p_pw);
+  return coalesce((select json_agg(json_build_object('id',id,'name',name,'role',role,'active',active,
+    'last_login',last_login,'created_at',created_at) order by created_at) from mariage_access), '[]'::json);
+end $$;
+
+create or replace function public.mariage_save_access(p_pw text, p jsonb)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare pin text := nullif(trim(coalesce(p->>'pin','')),'');
+begin
+  perform mariage_check(p_pw);
+  if pin is not null then
+    if pin !~ '^[0-9]{4,8}$' then raise exception 'PIN_INVALIDE'; end if;
+    if exists (select 1 from mariage_access where pin_hash = crypt(pin, pin_hash)
+               and id is distinct from (p->>'id')::uuid)
+       or exists (select 1 from mariage_settings where admin_hash = crypt(pin, admin_hash)) then
+      raise exception 'PIN_DEJA_UTILISE';
+    end if;
+  end if;
+  if p->>'id' is null then
+    if pin is null then raise exception 'PIN_INVALIDE'; end if;
+    if coalesce(trim(p->>'name'),'') = '' then raise exception 'NOM_REQUIS'; end if;
+    insert into mariage_access (name, pin_hash, role)
+    values (trim(p->>'name'), crypt(pin, gen_salt('bf')), coalesce(p->>'role','scan'));
+  else
+    update mariage_access set
+      name     = coalesce(nullif(trim(p->>'name'),''), name),
+      role     = coalesce(p->>'role', role),
+      active   = coalesce((p->>'active')::boolean, active),
+      pin_hash = case when pin is null then pin_hash else crypt(pin, gen_salt('bf')) end
+    where id = (p->>'id')::uuid;
+  end if;
+end $$;
+
+create or replace function public.mariage_delete_access(p_pw text, p_id uuid)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform mariage_check(p_pw);
+  delete from mariage_access where id = p_id;
 end $$;
 
 create or replace function public.mariage_login(p_pw text)
@@ -72,7 +168,7 @@ end $$;
 create or replace function public.mariage_get_settings(p_pw text)
 returns json language plpgsql security definer set search_path = public, extensions as $$
 begin
-  perform mariage_check(p_pw);
+  perform mariage_need(p_pw, 'scan');
   return (select to_jsonb(s) - 'admin_hash' from mariage_settings s where id = 1);
 end $$;
 
@@ -108,7 +204,7 @@ end $$;
 create or replace function public.mariage_list_guests(p_pw text)
 returns setof public.mariage_guests language plpgsql security definer set search_path = public, extensions as $$
 begin
-  perform mariage_check(p_pw);
+  perform mariage_need(p_pw, 'scan');
   return query select * from mariage_guests order by created_at desc;
 end $$;
 
@@ -116,7 +212,7 @@ create or replace function public.mariage_upsert_guest(p_pw text, p jsonb)
 returns public.mariage_guests language plpgsql security definer set search_path = public, extensions as $$
 declare r mariage_guests;
 begin
-  perform mariage_check(p_pw);
+  perform mariage_need(p_pw, 'team');
   if coalesce(trim(p->>'first_name'),'') = '' then raise exception 'PRENOM_REQUIS'; end if;
   if p->>'id' is null then
     insert into mariage_guests (first_name, last_name, phone_prefix, phone, gender)
@@ -139,37 +235,37 @@ end $$;
 create or replace function public.mariage_delete_guest(p_pw text, p_id uuid)
 returns void language plpgsql security definer set search_path = public, extensions as $$
 begin
-  perform mariage_check(p_pw);
+  perform mariage_need(p_pw, 'team');
   delete from mariage_guests where id = p_id;
 end $$;
 
 create or replace function public.mariage_mark_sent(p_pw text, p_id uuid)
 returns void language plpgsql security definer set search_path = public, extensions as $$
 begin
-  perform mariage_check(p_pw);
+  perform mariage_need(p_pw, 'team');
   update mariage_guests set sent_at = now() where id = p_id;
 end $$;
 
 create or replace function public.mariage_reset_checkin(p_pw text, p_id uuid)
 returns void language plpgsql security definer set search_path = public, extensions as $$
 begin
-  perform mariage_check(p_pw);
-  update mariage_guests set checked_in_at = null where id = p_id;
+  perform mariage_need(p_pw, 'team');
+  update mariage_guests set checked_in_at = null, checked_in_by = null where id = p_id;
 end $$;
 
 create or replace function public.mariage_scan_lookup(p_pw text, p_token text)
 returns json language plpgsql security definer set search_path = public, extensions as $$
 begin
-  perform mariage_check(p_pw);
+  perform mariage_need(p_pw, 'scan');
   return (select row_to_json(g) from mariage_guests g where token = p_token);
 end $$;
 
 create or replace function public.mariage_scan_confirm(p_pw text, p_token text)
 returns json language plpgsql security definer set search_path = public, extensions as $$
-declare r mariage_guests;
+declare r mariage_guests; me json;
 begin
-  perform mariage_check(p_pw);
-  update mariage_guests set checked_in_at = now()
+  me := mariage_need(p_pw, 'scan');
+  update mariage_guests set checked_in_at = now(), checked_in_by = me->>'name'
     where token = p_token and checked_in_at is null
     returning * into r;
   if r.id is null then
@@ -193,10 +289,14 @@ begin
   );
 end $$;
 
-revoke all on public.mariage_settings, public.mariage_guests from anon, authenticated;
-revoke execute on function public.mariage_check(text) from public, anon, authenticated;
+revoke all on public.mariage_settings, public.mariage_guests, public.mariage_access from anon, authenticated;
+revoke execute on function public.mariage_check(text), public.mariage_auth(text), public.mariage_need(text,text) from public, anon, authenticated;
 grant execute on function
   public.mariage_login(text),
+  public.mariage_whoami(text),
+  public.mariage_list_access(text),
+  public.mariage_save_access(text,jsonb),
+  public.mariage_delete_access(text,uuid),
   public.mariage_change_password(text,text),
   public.mariage_get_settings(text),
   public.mariage_save_settings(text,jsonb),

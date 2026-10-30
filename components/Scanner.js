@@ -133,7 +133,7 @@ export default function Scanner({ pw }) {
               <div className="icon">⛔</div>
               <div className="tag">{g.gender === "F" ? "Déjà entrée" : "Déjà entré"}</div>
               <div className="big">{fullName(g)}</div>
-              <div>Cette personne est déjà rentrée à <b>{hhmm(g.checked_in_at)}</b></div>
+              <div>Cette personne est déjà rentrée à <b>{hhmm(g.checked_in_at)}</b>{g.checked_in_by ? <> · scanné par <b>{g.checked_in_by}</b></> : null}</div>
             </>
           )}
           {state.kind === "unknown" && (
