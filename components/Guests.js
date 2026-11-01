@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { rpc } from "@/lib/supabase";
 import { PREFIXES } from "@/lib/prefixes";
 import { renderFullPage, qrDataUrl, downloadDataUrl, fullName, slug } from "@/lib/card";
-import { whatsappLink } from "@/lib/message";
+import { shareText, whatsappTextLink } from "@/lib/message";
 
 const EMPTY = { first_name: "", last_name: "", phone_prefix: "+253", phone: "" };
 
@@ -74,22 +74,46 @@ export default function Guests({ pw, settings, me = { role: "admin" } }) {
     setGuests((gs) => gs.filter((x) => x.id !== g.id));
   }
 
-  async function share(g) {
-    if (!g.phone) {
-      alert("Ajoute un numéro de téléphone pour cet invité.");
-      return;
-    }
-    window.open(whatsappLink(settings, g), "_blank");
+  async function markSent(g) {
     try {
       await rpc("mariage_mark_sent", { p_pw: pw, p_id: g.id });
       setGuests((gs) => gs.map((x) => (x.id === g.id ? { ...x, sent_at: new Date().toISOString() } : x)));
     } catch {}
   }
 
-  async function openCard(g) {
-    setPreview({ guest: g, url: null });
+  // Prépare l'image (le partage doit ensuite partir d'un clic direct)
+  async function openCard(g, forShare = false) {
+    setPreview({ guest: g, url: null, file: null, forShare });
     const c = await renderFullPage(settings, g);
-    setPreview({ guest: g, url: c.toDataURL("image/png") });
+    const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.92));
+    const file = new File([blob], `invitation-${slug(fullName(g))}.jpg`, { type: "image/jpeg" });
+    setPreview({ guest: g, url: URL.createObjectURL(blob), file, forShare });
+  }
+
+  const share = (g) => openCard(g, true);
+
+  async function sendImage() {
+    const { guest: g, file, url } = preview;
+    const text = shareText(settings, g);
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], text });
+        await markSent(g);
+        setPreview(null);
+      } catch (e) {
+        if (e.name !== "AbortError") alert("Partage impossible : " + e.message);
+      }
+      return;
+    }
+    // Ordinateur : on télécharge l'image et on ouvre la discussion WhatsApp
+    downloadDataUrl(url, file.name);
+    if (g.phone) window.open(whatsappTextLink(settings, g), "_blank");
+    alert("Image téléchargée : glisse-la dans la discussion WhatsApp qui vient de s'ouvrir.");
+    await markSent(g);
+  }
+
+  async function copyNumber(g) {
+    try { await navigator.clipboard.writeText(`${g.phone_prefix}${g.phone}`); } catch {}
   }
 
   async function dlQR(g) {
@@ -207,9 +231,18 @@ export default function Guests({ pw, settings, me = { role: "admin" } }) {
       {preview && (
         <div className="overlay" onClick={() => setPreview(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            {preview.url ? <img src={preview.url} alt="Carte" /> : <div className="empty">Génération…</div>}
+            {preview.url ? <img src={preview.url} alt="Carte" style={{ maxHeight: "55vh", objectFit: "contain" }} /> : <div className="empty">Génération…</div>}
+            <button className="btn wa big" style={{ marginTop: 12 }} disabled={!preview.file} onClick={sendImage}>
+              {preview.file ? "Envoyer l'image sur WhatsApp" : "Préparation…"}
+            </button>
+            {preview.guest.phone && (
+              <div className="hint" style={{ textAlign: "center", marginTop: 8 }}>
+                Choisis WhatsApp puis le contact : <b>{fullName(preview.guest)}</b> · {preview.guest.phone_prefix} {preview.guest.phone}{" "}
+                <button className="btn sm" onClick={() => copyNumber(preview.guest)}>Copier n°</button>
+              </div>
+            )}
             <div className="btns">
-              <button className="btn primary" disabled={!preview.url} onClick={() => downloadDataUrl(preview.url, `invitation-${slug(fullName(preview.guest))}.png`)}>
+              <button className="btn primary" disabled={!preview.url} onClick={() => downloadDataUrl(preview.url, preview.file.name)}>
                 ⬇ Télécharger (image)
               </button>
               <button className="btn" onClick={() => dlQR(preview.guest)}>⬇ QR seul</button>
