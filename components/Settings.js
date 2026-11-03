@@ -7,16 +7,10 @@ import { buildMessage } from "@/lib/message";
 const DEMO = { first_name: "Prénom", last_name: "Nom", gender: "H", token: "demo123", phone_prefix: "+253", phone: "" };
 
 const SLIDERS = [
-  ["qr_x", "QR — position horizontale", 0, 100],
-  ["qr_y", "QR — position verticale", 0, 100],
-  ["qr_size", "QR — taille", 5, 80],
-  ["groom_y", "Nom du marié — position verticale", 0, 100],
-  ["bride_y", "Nom de la mariée — position verticale", 0, 100],
-  ["couple_size", "Noms des mariés — taille", 3, 20],
-  ["couple_w", "Noms des mariés — largeur max", 20, 95],
-  ["name_x", "Ovale infos — position horizontale", 0, 100],
-  ["name_y", "Ovale infos — position verticale", 0, 100],
-  ["name_w", "Ovale infos — largeur max", 10, 95],
+  ["groom_y", "Famille 1 — position verticale", 0, 30],
+  ["bride_y", "Famille 2 — position verticale", 10, 40],
+  ["couple_size", "Noms des familles — taille", 3, 14],
+  ["couple_w", "Noms des familles — largeur max", 40, 90],
 ];
 const COLORS = [
   ["groom_color", "Couleur marié"],
