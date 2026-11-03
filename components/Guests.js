@@ -52,6 +52,9 @@ export default function Guests({ pw, settings, me = { role: "admin" } }) {
       const payload = { ...form, phone: form.phone.replace(/\D/g, ""), gender: tab, entries: Math.max(1, Number(form.entries) || 1) };
       if (editId) payload.id = editId;
       const r = await rpc("mariage_upsert_guest", { p_pw: pw, p: payload });
+      if (r && !("entries" in r)) {
+        alert("Ta base Supabase n'est pas à jour : le nombre d'entrées n'est pas enregistré. Relance supabase.sql dans le SQL Editor de ton projet Supabase.");
+      }
       setGuests((gs) => (editId ? gs.map((g) => (g.id === r.id ? r : g)) : [r, ...gs]));
       setForm({ ...EMPTY, phone_prefix: form.phone_prefix });
       setEditId(null);
