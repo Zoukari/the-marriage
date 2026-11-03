@@ -90,7 +90,7 @@ label.f { display: block; font-size: 12px; font-weight: 600; color: var(--muted)
 .tab .n { background: rgba(255,255,255,.7); border-radius: 99px; padding: 1px 9px; font-size: 13px; }
 
 /* Formulaire */
-.form { border-radius: var(--radius); padding: 16px; margin-bottom: 16px; display: grid; grid-template-columns: 1fr 1fr 170px 1fr auto; gap: 10px; align-items: end; }
+.form { border-radius: var(--radius); padding: 16px; margin-bottom: 16px; display: grid; grid-template-columns: 1fr 1fr 170px 1fr 90px auto; gap: 10px; align-items: end; }
 .form.H { background: var(--men); }
 .form.F { background: var(--women); }
 

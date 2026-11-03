@@ -8,6 +8,8 @@ function extractToken(text) {
   const m = t.match(/\/i\/([a-zA-Z0-9]+)/);
   return m ? m[1] : t;
 }
+const tot = (g) => Math.max(1, Number(g.entries) || 1);
+const usedOf = (g) => Number(g.entries_used ?? (g.checked_in_at ? 1 : 0)) || 0;
 const hhmm = (iso) => new Date(iso).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 
 export default function Scanner({ pw }) {
@@ -28,7 +30,7 @@ export default function Scanner({ pw }) {
     try {
       const g = await rpc("mariage_scan_lookup", { p_pw: pw, p_token: extractToken(text) });
       if (!g) setState({ kind: "unknown" });
-      else if (g.checked_in_at) setState({ kind: "already", guest: g });
+      else if (usedOf(g) >= tot(g)) setState({ kind: "already", guest: g });
       else setState({ kind: "found", guest: g });
     } catch (e) {
       setState({ kind: "error", msg: e.message });
@@ -114,9 +116,14 @@ export default function Scanner({ pw }) {
             <>
               <div className="tag">{g.gender === "H" ? "Invité · Homme" : "Invitée · Femme"}</div>
               <div className="big">{fullName(g)}</div>
+              {tot(g) > 1 && (
+                <p style={{ fontWeight: 700, fontSize: 18, margin: "6px 0" }}>
+                  🎟️ Billet {tot(g)} entrées · déjà utilisées : {usedOf(g)}
+                </p>
+              )}
               {wrongDoor && <p style={{ color: "var(--bad)", fontWeight: 700 }}>⚠️ Mauvaise entrée : {g.gender === "H" ? "homme" : "femme"}</p>}
               <button className="btn primary big" style={{ marginTop: 10 }} onClick={confirm} disabled={confirming}>
-                {confirming ? "…" : "✓ Confirmer l'entrée"}
+                {confirming ? "…" : tot(g) > 1 ? `✓ Valider l'entrée ${usedOf(g) + 1} / ${tot(g)}` : "✓ Confirmer l'entrée"}
               </button>
               <button className="btn" style={{ marginTop: 8, width: "100%" }} onClick={next}>Annuler</button>
             </>
@@ -125,15 +132,25 @@ export default function Scanner({ pw }) {
             <>
               <div className="icon">✅</div>
               <div className="big">{fullName(g)}</div>
-              <div className="tag">Entrée confirmée · {hhmm(g.checked_in_at)}</div>
+              <div className="tag">
+                {tot(g) > 1 ? `Entrée ${usedOf(g)} / ${tot(g)} validée` : "Entrée confirmée"} · {hhmm(g.last_checkin_at || g.checked_in_at)}
+              </div>
+              {usedOf(g) < tot(g) && (
+                <>
+                  <p style={{ margin: "8px 0 0" }}>Il reste <b>{tot(g) - usedOf(g)}</b> entrée{tot(g) - usedOf(g) > 1 ? "s" : ""} sur ce billet.</p>
+                  <button className="btn primary big" style={{ marginTop: 10 }} onClick={confirm} disabled={confirming}>
+                    {confirming ? "…" : `✓ Valider l'entrée ${usedOf(g) + 1} / ${tot(g)}`}
+                  </button>
+                </>
+              )}
             </>
           )}
           {state.kind === "already" && (
             <>
               <div className="icon">⛔</div>
-              <div className="tag">{g.gender === "F" ? "Déjà entrée" : "Déjà entré"}</div>
+              <div className="tag">{tot(g) > 1 ? `Billet épuisé · ${tot(g)} / ${tot(g)} entrées utilisées` : g.gender === "F" ? "Déjà entrée" : "Déjà entré"}</div>
               <div className="big">{fullName(g)}</div>
-              <div>Cette personne est déjà rentrée à <b>{hhmm(g.checked_in_at)}</b>{g.checked_in_by ? <> · scanné par <b>{g.checked_in_by}</b></> : null}</div>
+              <div>{tot(g) > 1 ? "Toutes les entrées ont déjà été utilisées. Dernière à" : "Cette personne est déjà rentrée à"} <b>{hhmm(g.last_checkin_at || g.checked_in_at)}</b>{g.checked_in_by ? <> · scanné par <b>{g.checked_in_by}</b></> : null}</div>
             </>
           )}
           {state.kind === "unknown" && (
@@ -164,7 +181,7 @@ export default function Scanner({ pw }) {
               onClick={() => { busyRef.current = false; setQ(""); handle(m.token); }}
             >
               <b>{fullName(m)}</b>
-              <span>{m.checked_in_at ? `Entré${m.gender === "F" ? "e" : ""} ${hhmm(m.checked_in_at)}` : "→"}</span>
+              <span>{tot(m) > 1 ? `${usedOf(m)}/${tot(m)}` : m.checked_in_at ? `Entré${m.gender === "F" ? "e" : ""} ${hhmm(m.checked_in_at)}` : "→"}</span>
             </button>
           ))}
         </div>

@@ -10,12 +10,12 @@ create table if not exists public.mariage_settings (
   venue         text not null default '',
   maps_url      text not null default '',
   card_bg       text,
-  qr_x          numeric not null default 33.06,
-  qr_y          numeric not null default 68.4,
-  qr_size       numeric not null default 33.9,
-  name_x        numeric not null default 50,
-  name_y        numeric not null default 45.5,
-  name_w        numeric not null default 68,
+  qr_x          numeric not null default 38.3,
+  qr_y          numeric not null default 63.3,
+  qr_size       numeric not null default 26.6,
+  name_x        numeric not null default 51.45,
+  name_y        numeric not null default 41.2,
+  name_w        numeric not null default 66,
   name_color    text not null default '#3f4a2f',
   admin_hash    text not null
 );
@@ -63,6 +63,11 @@ alter table public.mariage_access add constraint mariage_access_role_check check
 alter table public.mariage_guests add column if not exists invited_by uuid references public.mariage_access(id) on delete set null;
 alter table public.mariage_guests add column if not exists invited_by_name text;
 
+alter table public.mariage_guests add column if not exists entries int not null default 1;
+alter table public.mariage_guests add column if not exists entries_used int not null default 0;
+alter table public.mariage_guests add column if not exists last_checkin_at timestamptz;
+update public.mariage_guests set entries_used = 1 where checked_in_at is not null and entries_used = 0;
+
 alter table public.mariage_settings enable row level security;
 alter table public.mariage_access enable row level security;
 alter table public.mariage_guests   enable row level security;
@@ -86,7 +91,7 @@ begin
   select * into a from mariage_access where active and pin_hash = crypt(p_pw, pin_hash) limit 1;
   if a.id is not null then
     return json_build_object('role', a.role, 'name', a.name, 'id', a.id, 'quota', a.quota,
-      'used', (select count(*) from mariage_guests where invited_by = a.id));
+      'used', (select coalesce(sum(entries),0) from mariage_guests where invited_by = a.id));
   end if;
   return null;
 end $$;
@@ -124,7 +129,7 @@ returns json language plpgsql security definer set search_path = public, extensi
 begin
   perform mariage_check(p_pw);
   return coalesce((select json_agg(json_build_object('id',a.id,'name',a.name,'role',a.role,'active',a.active,
-    'quota',a.quota,'used',(select count(*) from mariage_guests g where g.invited_by = a.id),
+    'quota',a.quota,'used',(select coalesce(sum(g.entries),0) from mariage_guests g where g.invited_by = a.id),
     'last_login',a.last_login,'created_at',a.created_at) order by a.created_at) from mariage_access a), '[]'::json);
 end $$;
 
@@ -229,22 +234,25 @@ end $$;
 
 create or replace function public.mariage_upsert_guest(p_pw text, p jsonb)
 returns public.mariage_guests language plpgsql security definer set search_path = public, extensions as $$
-declare r mariage_guests; me json; inv boolean; mid uuid;
+declare r mariage_guests; me json; inv boolean; mid uuid; n int;
 begin
   me := mariage_need(p_pw, 'guests');
   inv := me->>'role' = 'invite';
   mid := (me->>'id')::uuid;
+  n := greatest(coalesce((p->>'entries')::int, 1), 1);
   if coalesce(trim(p->>'first_name'),'') = '' then raise exception 'PRENOM_REQUIS'; end if;
-  if p->>'id' is null then
-    if inv then
-      perform 1 from mariage_access where id = mid for update;
-      if (select count(*) from mariage_guests where invited_by = mid) >= (select quota from mariage_access where id = mid) then
-        raise exception 'QUOTA_ATTEINT';
-      end if;
+  if inv then
+    perform 1 from mariage_access where id = mid for update;
+    if (select coalesce(sum(entries),0) from mariage_guests
+        where invited_by = mid and id is distinct from (p->>'id')::uuid) + n
+       > (select quota from mariage_access where id = mid) then
+      raise exception 'QUOTA_ATTEINT';
     end if;
-    insert into mariage_guests (first_name, last_name, phone_prefix, phone, gender, invited_by, invited_by_name)
+  end if;
+  if p->>'id' is null then
+    insert into mariage_guests (first_name, last_name, phone_prefix, phone, gender, entries, invited_by, invited_by_name)
     values (trim(p->>'first_name'), trim(coalesce(p->>'last_name','')),
-            coalesce(p->>'phone_prefix','+253'), coalesce(p->>'phone',''), p->>'gender',
+            coalesce(p->>'phone_prefix','+253'), coalesce(p->>'phone',''), p->>'gender', n,
             mid, case when me->>'role' = 'admin' then null else me->>'name' end)
     returning * into r;
   else
@@ -253,7 +261,8 @@ begin
       last_name    = trim(coalesce(p->>'last_name','')),
       phone_prefix = coalesce(p->>'phone_prefix', phone_prefix),
       phone        = coalesce(p->>'phone', phone),
-      gender       = coalesce(p->>'gender', gender)
+      gender       = coalesce(p->>'gender', gender),
+      entries      = n
     where id = (p->>'id')::uuid and (not inv or invited_by = mid)
     returning * into r;
     if r.id is null then raise exception 'ACCES_REFUSE'; end if;
@@ -283,7 +292,7 @@ create or replace function public.mariage_reset_checkin(p_pw text, p_id uuid)
 returns void language plpgsql security definer set search_path = public, extensions as $$
 begin
   perform mariage_need(p_pw, 'team');
-  update mariage_guests set checked_in_at = null, checked_in_by = null where id = p_id;
+  update mariage_guests set checked_in_at = null, checked_in_by = null, entries_used = 0, last_checkin_at = null where id = p_id;
 end $$;
 
 create or replace function public.mariage_scan_lookup(p_pw text, p_token text)
@@ -298,8 +307,10 @@ returns json language plpgsql security definer set search_path = public, extensi
 declare r mariage_guests; me json;
 begin
   me := mariage_need(p_pw, 'scan');
-  update mariage_guests set checked_in_at = now(), checked_in_by = me->>'name'
-    where token = p_token and checked_in_at is null
+  update mariage_guests set entries_used = entries_used + 1,
+      checked_in_at = coalesce(checked_in_at, now()), last_checkin_at = now(),
+      checked_in_by = me->>'name'
+    where token = p_token and entries_used < entries
     returning * into r;
   if r.id is null then
     select * into r from mariage_guests where token = p_token;
@@ -317,7 +328,7 @@ begin
   if g.id is null then return null; end if;
   return json_build_object(
     'guest', json_build_object('first_name', g.first_name, 'last_name', g.last_name,
-                               'gender', g.gender, 'token', g.token),
+                               'gender', g.gender, 'token', g.token, 'entries', g.entries),
     'settings', (select to_jsonb(s) - 'admin_hash' from mariage_settings s where id = 1)
   );
 end $$;

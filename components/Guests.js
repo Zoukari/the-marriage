@@ -2,10 +2,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { rpc } from "@/lib/supabase";
 import { PREFIXES } from "@/lib/prefixes";
-import { renderFullPage, qrDataUrl, downloadDataUrl, fullName, slug } from "@/lib/card";
+import { renderCard, qrDataUrl, downloadDataUrl, fullName, slug } from "@/lib/card";
 import { shareText, whatsappTextLink } from "@/lib/message";
 
-const EMPTY = { first_name: "", last_name: "", phone_prefix: "+253", phone: "" };
+const EMPTY = { first_name: "", last_name: "", phone_prefix: "+253", phone: "", entries: 1 };
 
 const ERRORS = {
   QUOTA_ATTEINT: "Quota atteint : tu ne peux plus ajouter d'invités. Demande à l'admin d'augmenter ton quota.",
@@ -49,7 +49,7 @@ export default function Guests({ pw, settings, me = { role: "admin" } }) {
     setSaving(true);
     setErr("");
     try {
-      const payload = { ...form, phone: form.phone.replace(/\D/g, ""), gender: tab };
+      const payload = { ...form, phone: form.phone.replace(/\D/g, ""), gender: tab, entries: Math.max(1, Number(form.entries) || 1) };
       if (editId) payload.id = editId;
       const r = await rpc("mariage_upsert_guest", { p_pw: pw, p: payload });
       setGuests((gs) => (editId ? gs.map((g) => (g.id === r.id ? r : g)) : [r, ...gs]));
@@ -64,7 +64,7 @@ export default function Guests({ pw, settings, me = { role: "admin" } }) {
   function edit(g) {
     setTab(g.gender);
     setEditId(g.id);
-    setForm({ first_name: g.first_name, last_name: g.last_name, phone_prefix: g.phone_prefix, phone: g.phone });
+    setForm({ first_name: g.first_name, last_name: g.last_name, phone_prefix: g.phone_prefix, phone: g.phone, entries: g.entries || 1 });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -84,7 +84,7 @@ export default function Guests({ pw, settings, me = { role: "admin" } }) {
   // Prépare l'image (le partage doit ensuite partir d'un clic direct)
   async function openCard(g, forShare = false) {
     setPreview({ guest: g, url: null, file: null, forShare });
-    const c = await renderFullPage(settings, g);
+    const c = await renderCard(settings, g);
     const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.92));
     const file = new File([blob], `invitation-${slug(fullName(g))}.jpg`, { type: "image/jpeg" });
     setPreview({ guest: g, url: URL.createObjectURL(blob), file, forShare });
@@ -127,8 +127,9 @@ export default function Guests({ pw, settings, me = { role: "admin" } }) {
   }
 
   const quota = me.quota || 0;
-  const used = guests.length;
+  const used = guests.reduce((t, g) => t + (g.entries || 1), 0);
   const full = isInviter && used >= quota;
+  const left = Math.max(quota - used, 0);
   const sent = byTab.filter((g) => g.sent_at).length;
   const present = byTab.filter((g) => g.checked_in_at).length;
 
@@ -139,13 +140,13 @@ export default function Guests({ pw, settings, me = { role: "admin" } }) {
       {isInviter && (
         <div className="panel" style={{ background: full ? "var(--bad-bg)" : "var(--paper)", borderColor: full ? "var(--bad)" : "var(--line)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
-            <b style={{ fontSize: 16 }}>{full ? "Quota atteint" : "Invitations restantes"}</b>
+            <b style={{ fontSize: 16 }}>{full ? "Quota atteint" : "Entrées restantes"}</b>
             <b style={{ fontSize: 26, color: full ? "var(--bad)" : "var(--olive)" }}>{Math.max(quota - used, 0)}</b>
           </div>
           <div style={{ height: 8, background: "var(--line)", borderRadius: 99, marginTop: 10, overflow: "hidden" }}>
             <div style={{ width: `${quota ? Math.min((used / quota) * 100, 100) : 100}%`, height: "100%", background: full ? "var(--bad)" : "var(--olive)" }} />
           </div>
-          <div className="hint">{used} / {quota} invités ajoutés</div>
+          <div className="hint">{used} / {quota} entrées utilisées (une invitation peut compter plusieurs entrées)</div>
         </div>
       )}
 
@@ -185,6 +186,11 @@ export default function Guests({ pw, settings, me = { role: "admin" } }) {
           <label className="f">Numéro WhatsApp</label>
           <input className="input" inputMode="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="77 12 34 56" />
         </div>
+        <div>
+          <label className="f">Entrées</label>
+          <input className="input" type="number" min="1" inputMode="numeric" value={form.entries}
+            onChange={(e) => setForm({ ...form, entries: e.target.value.replace(/\D/g, "") })} style={{ fontWeight: 700 }} />
+        </div>
         <div className="wide" style={{ display: "flex", gap: 6 }}>
           <button className="btn primary" disabled={saving || (full && !editId)} style={{ flex: 1 }}>
             {editId ? "Enregistrer" : "+ Ajouter"}
@@ -210,9 +216,10 @@ export default function Guests({ pw, settings, me = { role: "admin" } }) {
             <div key={g.id} className={`row ${g.gender}`}>
               <div className="who">
                 <b>{fullName(g)}</b>
+                {(g.entries || 1) > 1 && <span className="pill" style={{ background: "#fff3d6", color: "#8a6410" }}>🎟️ {g.entries} entrées</span>}
                 {g.sent_at && <span className="pill sent">✓ Envoyé</span>}
                 {!isInviter && g.invited_by_name && <span className="pill" style={{ background: "#efe9f7", color: "#6b4f96" }}>par {g.invited_by_name}</span>}
-                {g.checked_in_at && <span className="pill in">Entré{g.gender === "F" ? "e" : ""} {new Date(g.checked_in_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}{g.checked_in_by ? ` · ${g.checked_in_by}` : ""}</span>}
+                {g.checked_in_at && <span className="pill in">{(g.entries || 1) > 1 ? `Entrées ${g.entries_used || 1}/${g.entries}` : `Entré${g.gender === "F" ? "e" : ""}`} {new Date(g.checked_in_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}{g.checked_in_by ? ` · ${g.checked_in_by}` : ""}</span>}
                 <div className="tel">{g.phone ? `${g.phone_prefix} ${g.phone}` : "Pas de numéro"}</div>
               </div>
               <div className="actions">
