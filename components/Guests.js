@@ -88,7 +88,7 @@ export default function Guests({ pw, settings, me = { role: "admin" } }) {
     const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.92));
     const png = await new Promise((r) => c.toBlob(r, "image/png"));
     const file = new File([blob], `invitation-${slug(fullName(g))}.jpg`, { type: "image/jpeg" });
-    setPreview({ guest: g, url: URL.createObjectURL(blob), file, png, forShare, copied: false });
+    setPreview({ guest: g, url: URL.createObjectURL(blob), file, png, forShare, copied: undefined });
   }
 
   const share = (g) => openCard(g, true);
@@ -274,6 +274,16 @@ export default function Guests({ pw, settings, me = { role: "admin" } }) {
                   La discussion s'ouvre directement avec le message prêt.<br />
                   Pour joindre la carte : <b>appui long dans la zone de texte → Coller</b>, puis <b>Envoyer</b>.
                 </div>
+                {preview.copied === true && (
+                  <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: "var(--ok-bg)", color: "var(--ok)", fontWeight: 600, textAlign: "center" }}>
+                    ✓ Carte copiée : dans WhatsApp, appui long → Coller → Envoyer
+                  </div>
+                )}
+                {preview.copied === false && (
+                  <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: "var(--bad-bg)", color: "var(--bad)", fontWeight: 600, textAlign: "center" }}>
+                    Ce téléphone n'a pas pu copier la carte. Envoie-la avec « Partager l'image » ci-dessous.
+                  </div>
+                )}
                 <button className="btn" style={{ marginTop: 8, width: "100%" }} disabled={!preview.file} onClick={sendImage}>
                   Partager l'image (choisir le contact)
                 </button>
