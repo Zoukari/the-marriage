@@ -4,7 +4,7 @@ export const metadata = {
   metadataBase: new URL(process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "http://localhost:3000"),
   title: "Mariage — Invitation",
   description: "Ta carte d'invitation personnelle — présente le QR code à l'entrée.",
-  openGraph: { title: "Invitation au mariage", description: "Ta carte d'invitation personnelle", images: ["/card.jpg"] },
+  openGraph: { title: "Invitation au mariage", description: "Ta carte d'invitation personnelle", images: ["/carte-v4.jpg"] },
 };
 
 export const viewport = { width: "device-width", initialScale: 1, themeColor: "#f6f3ea" };
