@@ -83,14 +83,40 @@ export default function Guests({ pw, settings, me = { role: "admin" } }) {
 
   // Prépare l'image (le partage doit ensuite partir d'un clic direct)
   async function openCard(g, forShare = false) {
-    setPreview({ guest: g, url: null, file: null, forShare });
+    setPreview({ guest: g, url: null, file: null, png: null, forShare });
     const c = await renderCard(settings, g);
     const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.92));
+    const png = await new Promise((r) => c.toBlob(r, "image/png"));
     const file = new File([blob], `invitation-${slug(fullName(g))}.jpg`, { type: "image/jpeg" });
-    setPreview({ guest: g, url: URL.createObjectURL(blob), file, forShare });
+    setPreview({ guest: g, url: URL.createObjectURL(blob), file, png, forShare, copied: false });
   }
 
   const share = (g) => openCard(g, true);
+
+  // Ouvre directement la discussion WhatsApp de l'invité (message pré-rempli),
+  // l'image est copiée : dans WhatsApp, appui long → Coller → Envoyer.
+  async function sendDirect() {
+    const { guest: g, png } = preview;
+    if (!g.phone) {
+      alert("Pas de numéro pour cet invité : utilise « Choisir le contact ».");
+      return;
+    }
+    let copied = false;
+    try {
+      if (navigator.clipboard && window.ClipboardItem && png) {
+        await Promise.race([
+          navigator.clipboard.write([new window.ClipboardItem({ "image/png": png })]),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 1500)),
+        ]);
+        copied = true;
+      }
+    } catch {}
+    const link = whatsappTextLink(settings, g);
+    if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) window.location.href = link;
+    else window.open(link, "_blank");
+    setPreview((p) => (p ? { ...p, copied } : p));
+    await markSent(g);
+  }
 
   async function sendImage() {
     const { guest: g, file, url } = preview;
@@ -239,14 +265,23 @@ export default function Guests({ pw, settings, me = { role: "admin" } }) {
         <div className="overlay" onClick={() => setPreview(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             {preview.url ? <img src={preview.url} alt="Carte" style={{ maxHeight: "55vh", objectFit: "contain" }} /> : <div className="empty">Génération…</div>}
-            <button className="btn wa big" style={{ marginTop: 12 }} disabled={!preview.file} onClick={sendImage}>
-              {preview.file ? "Envoyer l'image sur WhatsApp" : "Préparation…"}
-            </button>
-            {preview.guest.phone && (
-              <div className="hint" style={{ textAlign: "center", marginTop: 8 }}>
-                Choisis WhatsApp puis le contact : <b>{fullName(preview.guest)}</b> · {preview.guest.phone_prefix} {preview.guest.phone}{" "}
-                <button className="btn sm" onClick={() => copyNumber(preview.guest)}>Copier n°</button>
-              </div>
+            {preview.guest.phone ? (
+              <>
+                <button className="btn wa big" style={{ marginTop: 12 }} disabled={!preview.png} onClick={sendDirect}>
+                  {preview.png ? `Envoyer à ${fullName(preview.guest)}` : "Préparation…"}
+                </button>
+                <div className="hint" style={{ textAlign: "center", marginTop: 8 }}>
+                  La discussion s'ouvre directement avec le message prêt.<br />
+                  Pour joindre la carte : <b>appui long dans la zone de texte → Coller</b>, puis <b>Envoyer</b>.
+                </div>
+                <button className="btn" style={{ marginTop: 8, width: "100%" }} disabled={!preview.file} onClick={sendImage}>
+                  Partager l'image (choisir le contact)
+                </button>
+              </>
+            ) : (
+              <button className="btn wa big" style={{ marginTop: 12 }} disabled={!preview.file} onClick={sendImage}>
+                {preview.file ? "Partager l'image sur WhatsApp" : "Préparation…"}
+              </button>
             )}
             <div className="btns">
               <button className="btn primary" disabled={!preview.url} onClick={() => downloadDataUrl(preview.url, preview.file.name)}>
