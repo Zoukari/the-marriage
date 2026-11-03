@@ -10,12 +10,12 @@ create table if not exists public.mariage_settings (
   venue         text not null default '',
   maps_url      text not null default '',
   card_bg       text,
-  qr_x          numeric not null default 31.45,
-  qr_y          numeric not null default 31.18,
-  qr_size       numeric not null default 37.1,
-  name_x        numeric not null default 52.06,
-  name_y        numeric not null default 64.33,
-  name_w        numeric not null default 60,
+  qr_x          numeric not null default 33.06,
+  qr_y          numeric not null default 68.4,
+  qr_size       numeric not null default 33.9,
+  name_x        numeric not null default 50,
+  name_y        numeric not null default 45.5,
+  name_w        numeric not null default 68,
   name_color    text not null default '#3f4a2f',
   admin_hash    text not null
 );

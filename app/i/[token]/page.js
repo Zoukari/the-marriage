@@ -58,7 +58,7 @@ export default function Invitation({ params }) {
       {img ? <img className="cardimg" src={img} alt="Carte d'invitation" /> : <div className="loading" style={{ minHeight: 400 }}>…</div>}
       <div className="info">
         <div className="t">{fullName(g)}</div>
-        <p>Tu es {isF ? "invitée" : "invité"} au mariage de</p>
+        <p>Vous êtes {isF ? "invitée" : "invité"} au mariage de</p>
         <p className="serif" style={{ fontSize: 24, fontWeight: 700, color: "var(--ink)", margin: "2px 0 10px" }}>{couple(s)}</p>
         <p style={{ color: "var(--ink)", fontWeight: 600 }}>{cap(formatDate(s.event_date))}</p>
         <p style={{ color: "var(--olive)", fontWeight: 600 }}>
